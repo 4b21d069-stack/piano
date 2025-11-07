@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🎹 Piano Studio 線上鋼琴模擬器</title>
+
+  <style>
+    body { margin: 0; background: #0c0c0c; color: #eee; font-family: "Noto Sans TC", sans-serif; display: flex; flex-direction: column; min-height: 100vh;}
+    header { background: #181818; padding: 16px 40px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; z-index: 10; }
+    header h1 { font-size: 1.8rem; color: #fff; margin: 0; }
+    main { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 0; overflow-x: auto; }
+    #piano { display: flex; position: relative; user-select: none; padding: 10px; }
+    .white-key, .black-key { border: 1px solid #333; position: relative; transition: all 0.1s ease; }
+    .white-key { width: 40px; height: 200px; background: linear-gradient(to bottom, #fff 0%, #e5e5e5 100%); margin: 0 1px; z-index: 1; border-radius: 0 0 4px 4px; }
+    .white-key.active { transform: translateY(4px); background: linear-gradient(to bottom, #ccc 0%, #999 100%); box-shadow: inset 0 4px 8px rgba(0, 0, 0, 0.4); }
+    .black-key { width: 26px; height: 120px; background: linear-gradient(to bottom, #222 0%, #000 100%); position: absolute; top: 0; margin-left: -13px; z-index: 2; border-radius: 0 0 4px 4px; }
+    .black-key.active { transform: translateY(3px); background: linear-gradient(to bottom, #111 0%, #222 100%); box-shadow: inset 0 3px 6px rgba(255,255,255,0.3); }
+    .settings { display: flex; gap: 14px; align-items: center; }
+    label { font-size: 0.9rem; }
+    input[type="range"], select, button { background: #111; color: #eee; border: 1px solid #333; border-radius: 4px; padding: 4px 6px; cursor: pointer; }
+    button:hover, select:hover { background: #333; }
+    footer { background: #1b1b1b; padding: 36px 10%; font-size: 1rem; color: #ccc; line-height: 1.6; }
+    footer h3 { color: #fff; font-weight: 600; font-size: 1.2rem; margin-bottom: 12px; }
+    #metronome { margin-left: 10px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🎹 Piano Studio 線上鋼琴模擬器</h1>
+    <div class="settings">
+      <label>音量：</label>
+      <input type="range" id="volume" min="0" max="100" value="70">
+
+      <label>音色：</label>
+      <select id="soundSelect">
+        <option value="piano">鋼琴</option>
+        <option value="harp">豎琴</option>
+        <option value="violin">小提琴</option>
+        <option value="cello">大提琴</option>
+        <option value="guitar">吉他</option>
+        <option value="bass">貝斯</option>
+        <option value="strings">弦樂組</option>
+      </select>
+
+      <label>延音：</label>
+      <button id="sustainBtn">Off</button>
+
+      <label>節拍器：</label>
+      <input type="range" id="metronome" min="40" max="240" value="100">
+      <span id="bpmDisplay">100 BPM</span>
+      <button id="toggleMetronome">Start</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="piano"></div>
+  </main>
+
+  <footer>
+    <h3>🎵 樂理基礎知識</h3>
+    <p><strong>音階（Scale）</strong> 是音樂的基礎，像 C 大調的音符依序為：C、D、E、F、G、A、B。</p>
+    <p><strong>全音與半音：</strong> 相鄰兩個白鍵之間若有黑鍵，距離為全音；若沒有黑鍵，則為半音。</p>
+    <p><strong>和弦（Chord）：</strong> 同時彈奏三個或以上不同的音，就能形成和弦，例如 C 大和弦（C-E-G）。</p>
+  </footer>
+
+  <script>
+    const whiteOrder = ['C','D','E','F','G','A','B'];
+    const blackMap = {'C':'C#','D':'D#','F':'F#','G':'G#','A':'A#'};
+    const octaves = [2,3,4,5,6];
+    const notes = [];
+
+    for (let o of octaves) {
+      for (let w of whiteOrder) {
+        notes.push(w+o);
+        if (blackMap[w]) notes.push(blackMap[w]+o);
+      }
+    }
+
+    const piano = document.getElementById("piano");
+    notes.forEach(note=>{
+      if (!note.includes('#')) {
+        const w=document.createElement("div");
+        w.className="white-key";
+        w.dataset.note=note;
+        piano.appendChild(w);
+      }
+    });
+    notes.forEach((note,idx)=>{
+      if(note.includes('#')){
+        const parentIndex=notes.slice(0,idx).filter(n=>!n.includes('#')).length-1;
+        const w=piano.children[parentIndex];
+        if(w){
+          const b=document.createElement("div");
+          b.className="black-key";
+          b.dataset.note=note;
+          w.appendChild(b);
+        }
+      }
+    });
+
+    const ctx=new(window.AudioContext||window.webkitAudioContext)();
+    let currentVolume=0.7;
+    let sustainOn=false;
+    let currentSound="piano";
+    const volume=document.getElementById("volume");
+    const sustainBtn=document.getElementById("sustainBtn");
+    const soundSelect=document.getElementById("soundSelect");
+
+    volume.addEventListener("input",()=>{currentVolume=volume.value/100;});
+    sustainBtn.addEventListener("click",()=>{
+      sustainOn=!sustainOn;
+      sustainBtn.textContent=sustainOn?"On":"Off";
+    });
+    soundSelect.addEventListener("change",()=>{currentSound=soundSelect.value;});
+
+    const soundURLs={
+      piano:"https://cdn.pixabay.com/audio/2022/03/15/audio_991eb2bbd3.mp3",
+      harp:"https://cdn.pixabay.com/audio/2022/03/09/audio_39a1ec11c2.mp3",
+      violin:"https://cdn.pixabay.com/audio/2022/03/15/audio_3c17e4bb3e.mp3",
+      cello:"https://cdn.pixabay.com/audio/2022/03/15/audio_77ad7e5b2a.mp3",
+      guitar:"https://cdn.pixabay.com/audio/2022/03/15/audio_9a2f09b27d.mp3",
+      bass:"https://cdn.pixabay.com/audio/2022/03/15/audio_013d69e222.mp3",
+      strings:"https://cdn.pixabay.com/audio/2022/03/15/audio_b3a0b7bde3.mp3"
+    };
+
+    async function playNote(note){
+      const url=soundURLs[currentSound];
+      const response=await fetch(url);
+      const arrayBuffer=await response.arrayBuffer();
+      const audioBuffer=await ctx.decodeAudioData(arrayBuffer);
+      const source=ctx.createBufferSource();
+      source.buffer=audioBuffer;
+      const gain=ctx.createGain();
+      gain.gain.setValueAtTime(currentVolume,ctx.currentTime);
+      if(sustainOn){
+        gain.gain.exponentialRampToValueAtTime(0.01,ctx.currentTime+3);
+      }
+      source.connect(gain).connect(ctx.destination);
+      source.start();
+      return source;
+    }
+
+    let isMouseDown=false;
+    piano.addEventListener("mousedown",e=>{
+      isMouseDown=true;
+      const key=e.target.closest(".white-key, .black-key");
+      if(!key)return;
+      key.classList.add("active");
+      playNote(key.dataset.note);
+    });
+    piano.addEventListener("mouseup",()=>{
+      isMouseDown=false;
+      piano.querySelectorAll(".active").forEach(k=>k.classList.remove("active"));
+    });
+    piano.addEventListener("mousemove",e=>{
+      if(!isMouseDown)return;
+      const key=e.target.closest(".white-key, .black-key");
+      if(key && !key.classList.contains("active")){
+        key.classList.add("active");
+        playNote(key.dataset.note);
+      }
+    });
+    piano.addEventListener("mouseleave",()=>{
+      isMouseDown=false;
+      piano.querySelectorAll(".active").forEach(k=>k.classList.remove("active"));
+    });
+
+    // 節拍器功能
+    let metronomeInterval = null;
+    const metronomeInput = document.getElementById("metronome");
+    const bpmDisplay = document.getElementById("bpmDisplay");
+    const toggleMetronome = document.getElementById("toggleMetronome");
+
+    function playClick(){
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.frequency.value = 1000;
+      gain.gain.value = 0.2;
+      osc.connect(gain).connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.05);
+    }
+
+    metronomeInput.addEventListener("input", () => {
+      bpmDisplay.textContent = metronomeInput.value + " BPM";
+      if(metronomeInterval) startMetronome();
+    });
+
+    function startMetronome(){
+      if(metronomeInterval) clearInterval(metronomeInterval);
+      const interval = 60000 / metronomeInput.value;
+      metronomeInterval = setInterval(playClick, interval);
+    }
+
+    toggleMetronome.addEventListener("click", () => {
+      if(metronomeInterval){
+        clearInterval(metronomeInterval);
+        metronomeInterval = null;
+        toggleMetronome.textContent = "Start";
+      } else {
+        startMetronome();
+        toggleMetronome.textContent = "Stop";
+      }
+    });
+  </script>
+</body>
+</html>
